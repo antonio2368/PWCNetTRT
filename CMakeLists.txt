@@ -32,7 +32,7 @@ add_executable(
         Layers/PluginFactory.h
         Layers/LeakyReluLayerGpu.h)
 
-#target_compile_options(PWCNet PUBLIC "-fno-rtti")
+target_compile_options(PWCNet PUBLIC "-fno-rtti")
 
 set_source_files_properties( Layers/LeakyReluLayerGpu.cu PROPERTIES LANGUAGE CUDA )
 
@@ -47,13 +47,13 @@ set(CUDA_DEP_LIBS
         ${RT_LIB}
         ${CMAKE_DL_LIBS}
         ${CMAKE_THREAD_LIBS_INIT}
-        )
+)
 
 # Necessary to link nvinfer_plugin library.
 target_link_libraries(PWCNet
         PUBLIC ${CUDA_DEP_LIBS}
         -Wl,--unresolved-symbols=ignore-in-shared-libs
-        )
+)
 
 target_include_directories(PWCNet PRIVATE "/usr/local/cuda/include")
 
