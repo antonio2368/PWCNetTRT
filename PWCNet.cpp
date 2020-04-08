@@ -99,7 +99,7 @@ bool PWCNet::constructNetwork( PWCNet::UniquePtr< IBuilder >& builder, PWCNet::U
     (
         &firstImage,
         1,
-        leakyReluFactory.createPlugin( "leakyRelu", 0.01f )
+        *pluginFactory.createPlugin< LeakyReluLayer >( "leakyRelu", 0.01f )
     );
     assert( leakyReluLayer );
 
@@ -116,7 +116,7 @@ bool PWCNet::constructNetwork( PWCNet::UniquePtr< IBuilder >& builder, PWCNet::U
     (
         &concatOutput,
         1,
-        leakyReluFactory.createPlugin( "leakyRelu2", 0.02f )
+        *pluginFactory.createPlugin< LeakyReluLayer >( "leakyRelu2", 0.02f )
     );
     assert(leakyReluLayer2);
 

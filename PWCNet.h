@@ -62,7 +62,7 @@ private:
     std::unordered_map< std::string, nvinfer1::Weights > mWeightMap;
 
     // mEngine should always be after the factories because it's destructor should be called first
-    PluginFactory< LeakyReluLayer > leakyReluFactory;
+    PluginFactory pluginFactory;
     std::shared_ptr< nvinfer1::ICudaEngine > mEngine;
 
     bool constructNetwork( UniquePtr< nvinfer1::IBuilder >& builder, UniquePtr< nvinfer1::INetworkDefinition >& network );

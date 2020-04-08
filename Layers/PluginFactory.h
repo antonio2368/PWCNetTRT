@@ -13,23 +13,23 @@
 #include <algorithm>
 #include <cstdio>
 
-template< typename T >
+
+// TODO: RELEASE MEMORY!!!!
 class PluginFactory
 {
-    static_assert( std::is_base_of< nvinfer1::IPlugin, T >::value, "Template type should be derived from IPlugin" );
-
 public:
-    template< typename... Args >
-    nvinfer1::IPlugin& createPlugin( const char *layerName, Args&&... args )
+    template< typename T, typename... Args >
+    nvinfer1::IPlugin* createPlugin( const char *layerName, Args&&... args )
     {
+        static_assert( std::is_base_of< nvinfer1::IPlugin, T >::value, "Template type should be derived from IPlugin" );
+
         std::string strName{ layerName };
 
-        mPlugins.emplace( layerName, std::forward< Args >( args )... );
+        mPlugins[ layerName ] = ( nvinfer1::IPlugin* ) new T{ std::forward< Args >( args )... };
         return mPlugins.at( layerName );
-
     }
 private:
-    std::unordered_map< std::string, T > mPlugins;
+    std::unordered_map< std::string, nvinfer1::IPlugin* > mPlugins;
 };
 
 
