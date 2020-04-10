@@ -12,7 +12,7 @@
 class LeakyReluLayer : public nvinfer1::IPlugin
 {
 public:
-    LeakyReluLayer(float alpha ) : mAlpha{alpha }
+    LeakyReluLayer( float alpha ) : mAlpha{alpha }
     {}
 
     LeakyReluLayer(const void* buffer, std::size_t size );

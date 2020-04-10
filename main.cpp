@@ -13,6 +13,7 @@ int main() {
     params.flowPredLevels = 2;
     params.inputH = 3;
     params.inputW = 3;
+    params.searchRange = 2;
 
     setReportableSeverity( Logger::Severity::kWARNING );
 

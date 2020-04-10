@@ -19,17 +19,15 @@ class PluginFactory
 {
 public:
     template< typename T, typename... Args >
-    nvinfer1::IPlugin* createPlugin( const char *layerName, Args&&... args )
+    nvinfer1::IPlugin* createPlugin( Args&&... args )
     {
         static_assert( std::is_base_of< nvinfer1::IPlugin, T >::value, "Template type should be derived from IPlugin" );
 
-        std::string strName{ layerName };
-
-        mPlugins[ layerName ] = ( nvinfer1::IPlugin* ) new T{ std::forward< Args >( args )... };
-        return mPlugins.at( layerName );
+        mPlugins.push_back( ( nvinfer1::IPlugin* ) new T{ std::forward< Args >( args )... } );
+        return mPlugins.back();
     }
 private:
-    std::unordered_map< std::string, nvinfer1::IPlugin* > mPlugins;
+    std::vector< nvinfer1::IPlugin* > mPlugins;
 };
 
 

@@ -4,6 +4,10 @@
 
 #include "PWCNet.h"
 #include "Layers/LeakyReluLayer.h"
+#include "Layers/CostVolumeLayer.h"
+
+#include <array>
+#include <vector>
 
 namespace
 {
@@ -53,6 +57,7 @@ bool PWCNet::build()
     {
         return false;
     }
+    builder->setMaxWorkspaceSize( 1 << 20 );
 
     auto network = UniquePtr< nvinfer1::INetworkDefinition >( builder->createNetwork() );
     if ( !network )
@@ -95,33 +100,104 @@ bool PWCNet::constructNetwork( PWCNet::UniquePtr< IBuilder >& builder, PWCNet::U
     );
     assert( secondImage );
 
-    IPluginLayer* leakyReluLayer = network->addPlugin
-    (
-        &firstImage,
-        1,
-        *pluginFactory.createPlugin< LeakyReluLayer >( "leakyRelu", 0.01f )
-    );
-    assert( leakyReluLayer );
+    // extract features
+    std::vector< ITensor* > c1;
+    std::vector< ITensor* > c2;
 
-    std::vector< ITensor* > inputs = { leakyReluLayer->getOutput( 0 ), secondImage };
-    IConcatenationLayer* concat = network->addConcatenation
-    (
-        inputs.data(),
-        2
-    );
-    assert( concat );
+    extractFeatures( firstImage, network, c1 );
+    extractFeatures( secondImage, network, c2 );
 
-    auto const concatOutput{ concat->getOutput( 0 ) };
-    IPluginLayer* leakyReluLayer2 = network->addPlugin
-    (
-        &concatOutput,
-        1,
-        *pluginFactory.createPlugin< LeakyReluLayer >( "leakyRelu2", 0.02f )
-    );
-    assert(leakyReluLayer2);
+    nvinfer1::ITensor* feat;
+    nvinfer1::ITensor* flow;
+    nvinfer1::ITensor* upFlow;
+    nvinfer1::ITensor* upFeat;
+    for ( int level{ mParams.pyramidLevels }; level >= mParams.flowPredLevels; --level )
+    {
+        if ( level == mParams.pyramidLevels )
+        {
+            auto corr = calculateCostVolume
+            (
+                c1[ level - 1 ],
+                c2[ level - 2 ],
+                network
+            );
+            assert( corr );
 
-    leakyReluLayer2->getOutput( 0 )->setName( mParams.outputTensorNames[ 0 ].c_str() );
-    network->markOutput( *leakyReluLayer2->getOutput( 0 ) );
+            auto const resultPair = predictFlow
+            (
+                corr,
+                nullptr,
+                nullptr,
+                nullptr,
+                level,
+                network
+            );
+
+            feat = resultPair.first;
+            flow = resultPair.second;
+        }
+        else
+        {
+            auto corr = calculateCostVolume
+            (
+                c1[ level - 1 ],
+                upFlow,
+                network
+            );
+
+            auto const resultPair = predictFlow
+            (
+                 corr,
+                 c1[ level - 1],
+                 upFlow,
+                 upFeat,
+                 level,
+                 network
+            );
+
+            feat = resultPair.first;
+            flow = resultPair.second;
+        }
+
+        if ( level != mParams.flowPredLevels )
+        {
+            auto const deconvLayer = addDeconvolutionLayer
+            (
+                std::string{ "deconv" } + std::to_string( level ),
+                flow,
+                2,
+                nvinfer1::DimsHW{ 4, 4 },
+                nvinfer1::DimsHW{ 2, 2 },
+                network
+            );
+            upFlow = deconvLayer->getOutput( 0 );
+
+            auto const upFeatLayer = addDeconvolutionLayer
+            (
+                std::string{ "upfeat" } + std::to_string( level ),
+                feat,
+                2,
+                nvinfer1::DimsHW{ 4, 4 },
+                nvinfer1::DimsHW{ 2, 2 },
+                network
+            );
+
+            upFeat = upFeatLayer->getOutput( 0 );
+        }
+        else
+        {
+            flow = refineFlow
+            (
+                upFeat,
+                upFlow,
+                level,
+                network
+            );
+        }
+    }
+
+    flow->setName( mParams.outputTensorNames[ 0 ].c_str() );
+    network->markOutput( *flow );
 
     builder->setMaxBatchSize( mParams.batchSize );
 
@@ -177,8 +253,8 @@ bool PWCNet::processInput( common::BufferManager& buffers)
 
     for ( int i = 0; i < elemNumber; ++i )
     {
-        firstHostDataBuffer[ i ] = -1;
-        secondHostDataBuffer[ i ] = -2;
+        firstHostDataBuffer[ i ] = 2;
+        secondHostDataBuffer[ i ] = 2;
     }
 
     return true;
@@ -188,7 +264,7 @@ void PWCNet::printOutput( common::BufferManager& buffers)
 {
     float* prob = static_cast<float*>(buffers.getHostBuffer(mParams.outputTensorNames[0]));
     std::cout << "Output:\n";
-    for (int i = 0; i < 2 * 3 * mParams.inputH * mParams.inputW; ++i)
+    for (int i = 0; i < 25 * mParams.inputH * mParams.inputW; ++i)
     {
         std::cout << i << ": " << prob[i] << '\n';
     }
@@ -242,6 +318,273 @@ std::unordered_map< std::string, nvinfer1::Weights > PWCNet::loadWeights( std::s
     }
 
     return weightMap;
+}
+
+void PWCNet::extractFeatures
+(
+    nvinfer1::ITensor* input,
+    PWCNet::UniquePtr< INetworkDefinition >& network,
+    std::vector< nvinfer1::ITensor* >& extractedFeatures
+)
+{
+    std::array< int, 6 > channels{ 16, 32, 64, 96, 128, 196 };
+
+    nvinfer1::ITensor* currentTensor{ input };
+    for ( int i{ 0 }; i < mParams.pyramidLevels; ++i )
+    {
+        std::string layerLevelName = std::string{ "conv" } + std::to_string( i + 1 );
+
+        std::string layerName = layerLevelName + "a";
+        auto const conva = addConvolutionLayer
+        (
+            layerName,
+            currentTensor,
+            channels[ i ],
+            nvinfer1::DimsHW{ 3, 3 },
+            nvinfer1::DimsHW{ 2, 2 },
+            network
+        );
+
+        currentTensor = conva->getOutput( 0 );
+
+        layerName = layerLevelName + "aa";
+        auto const convaa = addConvolutionLayer
+        (
+            layerName,
+            currentTensor,
+            channels[ i ],
+            nvinfer1::DimsHW{ 3, 3 },
+            nvinfer1::DimsHW{ 1, 1 },
+            network
+        );
+
+        currentTensor = convaa->getOutput( 0 );
+
+        layerName = layerLevelName + "b";
+        auto const convb = addConvolutionLayer
+        (
+            layerName,
+            currentTensor,
+            channels[ i ],
+            nvinfer1::DimsHW{ 3, 3 },
+            nvinfer1::DimsHW{ 1, 1 },
+            network
+        );
+
+        currentTensor = convb->getOutput( 0 );
+
+        extractedFeatures.push_back( currentTensor );
+    }
+}
+
+nvinfer1::ILayer* PWCNet::addConvolutionLayer
+(
+    const std::string & layerName,
+    nvinfer1::ITensor *input,
+    int filterNum,
+    nvinfer1::DimsHW && kernelSize,
+    nvinfer1::DimsHW && strides,
+    PWCNet::UniquePtr<INetworkDefinition> &network,
+    nvinfer1::DimsHW && dilation
+)
+{
+    std::string const kernelWeights = layerName + "kernel";
+    std::string const biasWeights = layerName + "bias";
+    IConvolutionLayer* conv = network->addConvolution
+    (
+        *input,
+        filterNum,
+        kernelSize,
+        mWeightMap[ kernelWeights.c_str() ],
+        mWeightMap[ biasWeights.c_str() ]
+    );
+    assert( conv );
+    conv->setStride( strides );
+    conv->setDilation( dilation );
+    conv->setPadding( Utils::getPadding( input->getDimensions(), strides, kernelSize, dilation ) );
+
+    input = conv->getOutput( 0 );
+
+    nvinfer1::IPluginLayer* leakyRelu = network->addPlugin
+    (
+        &input,
+        1,
+        *mPluginFactory.createPlugin< LeakyReluLayer >( 0.1f )
+    );
+    assert( leakyRelu );
+
+    return leakyRelu;
+}
+
+nvinfer1::ILayer* PWCNet::addDeconvolutionLayer
+(
+    const std::string & layerName,
+    nvinfer1::ITensor* input,
+    int filterNum,
+    nvinfer1::DimsHW && kernelSize,
+    nvinfer1::DimsHW && strides,
+    PWCNet::UniquePtr< INetworkDefinition >& network
+)
+{
+    std::string const kernelWeights = layerName + "kernel";
+    std::string const biasWeights = layerName + "bias";
+    IDeconvolutionLayer* deconv = network->addDeconvolution
+    (
+        *input,
+        filterNum,
+        kernelSize,
+        mWeightMap[ kernelWeights.c_str() ],
+        mWeightMap[ biasWeights.c_str() ]
+    );
+    assert( deconv );
+    deconv->setStride( strides );
+    deconv->setPadding( Utils::getPadding( input->getDimensions(), strides, kernelSize, nvinfer1::DimsHW{ 1, 1 } ) );
+
+    return deconv;
+}
+
+nvinfer1::ITensor* PWCNet::calculateCostVolume
+(
+    nvinfer1::ITensor* firstInput,
+    nvinfer1::ITensor* secondInput,
+    PWCNet::UniquePtr< INetworkDefinition >& network
+)
+{
+    IPaddingLayer* paddingLayer = network->addPadding
+    (
+        *secondInput,
+        nvinfer1::DimsHW{ mParams.searchRange, mParams.searchRange },
+        nvinfer1::DimsHW{ mParams.searchRange, mParams.searchRange }
+    );
+    assert( paddingLayer );
+
+    std::vector< ITensor* > inputs{ firstInput, paddingLayer->getOutput( 0 ) };
+    IPluginLayer* costVolumeLayer = network->addPlugin
+    (
+        inputs.data(),
+        2,
+        *mPluginFactory.createPlugin< CostVolumeLayer >( mParams.searchRange )
+    );
+    assert( costVolumeLayer );
+
+    std::vector< nvinfer1::ITensor* > costVolumeOutputs;
+
+    for( int i = 0; i < costVolumeLayer->getNbOutputs(); ++i )
+    {
+        costVolumeOutputs.push_back( costVolumeLayer->getOutput( i ) );
+    }
+
+    IConcatenationLayer* concatLayer = network->addConcatenation
+    (
+        costVolumeOutputs.data(),
+        costVolumeOutputs.size()
+    );
+    assert( concatLayer );
+
+    nvinfer1::ITensor* concatOutput = concatLayer->getOutput( 0 );
+    IPluginLayer* leakyRelu = network->addPlugin
+    (
+        &concatOutput,
+        1,
+        *mPluginFactory.createPlugin< LeakyReluLayer >( 0.1f )
+    );
+    assert( leakyRelu );
+    return leakyRelu->getOutput( 0 );
+}
+
+std::pair< nvinfer1::ITensor*, nvinfer1::ITensor* > PWCNet::predictFlow
+(
+    nvinfer1::ITensor* corr,
+    nvinfer1::ITensor* c1,
+    nvinfer1::ITensor* upFlow,
+    nvinfer1::ITensor* upFeat,
+    int level,
+    PWCNet::UniquePtr< INetworkDefinition >& network
+)
+{
+    nvinfer1::ITensor* currentTensor = corr;
+    if ( c1 != nullptr && upFlow == nullptr && upFeat == nullptr )
+    {
+        std::vector< nvinfer1::ITensor* > inputs{ corr, c1, upFlow, upFeat };
+        IConcatenationLayer* concatLayer = network->addConcatenation
+        (
+            inputs.data(),
+            inputs.size()
+        );
+        assert( concatLayer );
+        currentTensor = concatLayer->getOutput( 0 );
+    }
+
+    std::array< int, 5 > channels{ 128, 128, 96, 64, 32 };
+
+    std::string layerName = std::string{ "conv" } + std::to_string( level ) + std::string{ "_" };
+    for ( int i = 0; i < channels.size(); ++i )
+    {
+        auto const convolution = addConvolutionLayer
+        (
+            layerName + std::to_string( i ),
+            currentTensor,
+            channels[ i ],
+            nvinfer1::DimsHW{ 3, 3 },
+            nvinfer1::DimsHW{ 1, 1 },
+            network
+        );
+        currentTensor = convolution->getOutput( 0 );
+    }
+
+    layerName = std::string{ "flow" } + std::to_string( level );
+    auto const flowPredictor = addConvolutionLayer
+    (
+        layerName,
+        currentTensor,
+        2,
+        nvinfer1::DimsHW{ 3, 3 },
+        nvinfer1::DimsHW{ 1, 1 },
+        network
+    );
+
+    return { currentTensor, flowPredictor->getOutput( 0 ) };
+}
+
+nvinfer1::ITensor* PWCNet::refineFlow
+(
+        nvinfer1::ITensor* upFeat,
+        nvinfer1::ITensor* upFlow,
+        int level,
+        PWCNet::UniquePtr< INetworkDefinition >& network
+)
+{
+    ITensor* currentTensor{ upFeat };
+
+    std::array< int, 7 > channels{ 128, 128, 128, 96, 64, 32, 2 };
+    std::array< int, 7 > dilation{ 1, 2, 4, 8, 16, 1, 1 };
+
+    for ( int i = 0; i < channels.size(); ++i )
+    {
+        auto const convolutionLayer = addConvolutionLayer
+        (
+            std::string{ "dc_conv" } + std::to_string( i + 1 ),
+            currentTensor,
+            channels[ i ],
+            nvinfer1::DimsHW{ 3, 3 },
+            nvinfer1::DimsHW{ 1, 1 },
+            network,
+            nvinfer1::DimsHW{ dilation[ i ], dilation [ i ] }
+        );
+
+        currentTensor = convolutionLayer->getOutput( 0 );
+    }
+
+    IElementWiseLayer* adder = network->addElementWise
+    (
+        *currentTensor,
+        *upFlow,
+        nvinfer1::ElementWiseOperation::kSUM
+    );
+    assert( adder );
+
+    return adder->getOutput( 0 );
+
 }
 
 //bool SampleMNISTAPI::teardown()

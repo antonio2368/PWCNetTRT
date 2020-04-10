@@ -3,3 +3,6 @@
 //
 
 #include "cudaUtils.h"
+
+const float Consts::kZero = 0.0f;
+const float Consts::kOne  = 1.0f;

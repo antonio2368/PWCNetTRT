@@ -16,6 +16,15 @@ add_executable(
         main.cpp
         PWCNet.cpp
         PWCNet.h
+        Layers/LeakyReluLayer.cpp
+        Layers/LeakyReluLayer.h
+        Layers/LeakyReluLayerGpu.cu
+        Layers/LeakyReluLayerGpu.h
+        Layers/PluginFactory.cpp
+        Layers/PluginFactory.h
+        Layers/LeakyReluLayerGpu.h
+        Layers/CostVolumeLayer.cpp
+        Layers/CostVolumeLayer.h
         Utils/common.h
         Utils/buffer.h
         Utils/logging.h
@@ -24,25 +33,22 @@ add_executable(
         Utils/half.h
         Utils/cudaUtils.cpp
         Utils/cudaUtils.h
-        Layers/LeakyReluLayer.cpp
-        Layers/LeakyReluLayer.h
-        Layers/LeakyReluLayerGpu.cu
-        Layers/LeakyReluLayerGpu.h
-        Layers/PluginFactory.cpp
-        Layers/PluginFactory.h
-        Layers/LeakyReluLayerGpu.h)
+        Utils/TensorUtils.cpp
+        Utils/TensorUtils.h
+)
 
 target_compile_options(PWCNet PUBLIC "-fno-rtti")
 
 set_source_files_properties( Layers/LeakyReluLayerGpu.cu PROPERTIES LANGUAGE CUDA )
 
-set(CUDA_RUNTIME "/usr/local/cuda/lib64/libcudart.so" )
+set(CUDART_LIB "/usr/local/cuda/lib64/libcudart.so" )
+set(CUDNN_LIB "/usr/lib/aarch64-linux-gnu/libcudnn.so" )
+
 
 set(CUDA_DEP_LIBS
         ${CUDART_LIB}
         ${CUBLAS_LIB}
         ${CUDNN_LIB}
-        ${CUDA_RUNTIME}
         nvinfer
         ${RT_LIB}
         ${CMAKE_DL_LIBS}
