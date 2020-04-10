@@ -409,7 +409,7 @@ nvinfer1::ILayer* PWCNet::addConvolutionLayer
     (
         &input,
         1,
-        *mPluginFactory.createPlugin< LeakyReluLayer >( 0.1f )
+        *mPluginFactory.createPlugin< LeakyReluLayer >( "leakyrelu", 0.1f )
     );
     assert( leakyRelu );
 
@@ -463,7 +463,7 @@ nvinfer1::ITensor* PWCNet::calculateCostVolume
     (
         inputs.data(),
         2,
-        *mPluginFactory.createPlugin< CostVolumeLayer >( mParams.searchRange )
+        *mPluginFactory.createPlugin< CostVolumeLayer >( "costvolume", mParams.searchRange )
     );
     assert( costVolumeLayer );
 
@@ -486,7 +486,7 @@ nvinfer1::ITensor* PWCNet::calculateCostVolume
     (
         &concatOutput,
         1,
-        *mPluginFactory.createPlugin< LeakyReluLayer >( 0.1f )
+        *mPluginFactory.createPlugin< LeakyReluLayer >( "leakyrelu", 0.1f )
     );
     assert( leakyRelu );
     return leakyRelu->getOutput( 0 );

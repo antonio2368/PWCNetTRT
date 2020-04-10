@@ -49,6 +49,11 @@ public:
 
     void serialize( void* buffer ) override;
     int enqueue( int batchSize, const void* const * inputs, void** outputs, void* workspace, cudaStream_t stream ) override;
+
+    ~LeakyReluLayer() override
+    {
+
+    }
 protected:
     float mAlpha;
     std::size_t mInputSize;

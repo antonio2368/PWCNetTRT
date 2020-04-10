@@ -43,6 +43,9 @@ public:
 
     int enqueue(int batchSize, const void *const *inputs, void **outputs, void *workspace, cudaStream_t stream) override;
 
+    ~CostVolumeLayer()
+    {}
+
 protected:
     int mMaxOffset;
     nvinfer1::DimsCHW mFirstInputDims;
