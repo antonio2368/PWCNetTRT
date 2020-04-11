@@ -5,6 +5,7 @@
 #include "PWCNet.h"
 #include "Layers/LeakyReluLayer.h"
 #include "Layers/CostVolumeLayer.h"
+#include "Layers/ImageWarpLayer.h"
 
 #include <array>
 #include <vector>
@@ -96,108 +97,120 @@ bool PWCNet::constructNetwork( PWCNet::UniquePtr< IBuilder >& builder, PWCNet::U
     (
         mParams.inputTensorNames[ 1 ].c_str(),
         nvinfer1::DataType::kFLOAT,
-        nvinfer1::DimsCHW( 3, mParams.inputH, mParams.inputW )
+        nvinfer1::DimsCHW( 2, mParams.inputH, mParams.inputW )
     );
     assert( secondImage );
 
-    // extract features
-    std::vector< ITensor* > c1;
-    std::vector< ITensor* > c2;
+    std::vector< ITensor* > images{ firstImage, secondImage };
+    IPluginLayer* imageWarp = network->addPlugin
+    (
+        images.data(),
+        2,
+        *mPluginFactory.createPlugin< ImageWarpLayer >( "imagewarp" )
+    );
+    assert( imageWarp );
 
-    extractFeatures( firstImage, network, c1 );
-    extractFeatures( secondImage, network, c2 );
-
-    nvinfer1::ITensor* feat;
-    nvinfer1::ITensor* flow;
-    nvinfer1::ITensor* upFlow;
-    nvinfer1::ITensor* upFeat;
-    for ( int level{ mParams.pyramidLevels }; level >= mParams.flowPredLevels; --level )
-    {
-        if ( level == mParams.pyramidLevels )
-        {
-            auto corr = calculateCostVolume
-            (
-                c1[ level - 1 ],
-                c2[ level - 2 ],
-                network
-            );
-            assert( corr );
-
-            auto const resultPair = predictFlow
-            (
-                corr,
-                nullptr,
-                nullptr,
-                nullptr,
-                level,
-                network
-            );
-
-            feat = resultPair.first;
-            flow = resultPair.second;
-        }
-        else
-        {
-            auto corr = calculateCostVolume
-            (
-                c1[ level - 1 ],
-                upFlow,
-                network
-            );
-
-            auto const resultPair = predictFlow
-            (
-                 corr,
-                 c1[ level - 1],
-                 upFlow,
-                 upFeat,
-                 level,
-                 network
-            );
-
-            feat = resultPair.first;
-            flow = resultPair.second;
-        }
-
-        if ( level != mParams.flowPredLevels )
-        {
-            auto const deconvLayer = addDeconvolutionLayer
-            (
-                std::string{ "deconv" } + std::to_string( level ),
-                flow,
-                2,
-                nvinfer1::DimsHW{ 4, 4 },
-                nvinfer1::DimsHW{ 2, 2 },
-                network
-            );
-            upFlow = deconvLayer->getOutput( 0 );
-
-            auto const upFeatLayer = addDeconvolutionLayer
-            (
-                std::string{ "upfeat" } + std::to_string( level ),
-                feat,
-                2,
-                nvinfer1::DimsHW{ 4, 4 },
-                nvinfer1::DimsHW{ 2, 2 },
-                network
-            );
-
-            upFeat = upFeatLayer->getOutput( 0 );
-        }
-        else
-        {
-            flow = refineFlow
-            (
-                upFeat,
-                upFlow,
-                level,
-                network
-            );
-        }
-    }
-
-    flow->setName( mParams.outputTensorNames[ 0 ].c_str() );
-    network->markOutput( *flow );
+    imageWarp->getOutput( 0 )->setName( mParams.outputTensorNames[ 0 ].c_str() );
+    network->markOutput( *imageWarp->getOutput( 0 ) );
+//
+//    // extract features
+//    std::vector< ITensor* > c1;
+//    std::vector< ITensor* > c2;
+//
+//    extractFeatures( firstImage, network, c1 );
+//    extractFeatures( secondImage, network, c2 );
+//
+//    nvinfer1::ITensor* feat;
+//    nvinfer1::ITensor* flow;
+//    nvinfer1::ITensor* upFlow;
+//    nvinfer1::ITensor* upFeat;
+//    for ( int level{ mParams.pyramidLevels }; level >= mParams.flowPredLevels; --level )
+//    {
+//        if ( level == mParams.pyramidLevels )
+//        {
+//            auto corr = calculateCostVolume
+//            (
+//                c1[ level - 1 ],
+//                c2[ level - 2 ],
+//                network
+//            );
+//            assert( corr );
+//
+//            auto const resultPair = predictFlow
+//            (
+//                corr,
+//                nullptr,
+//                nullptr,
+//                nullptr,
+//                level,
+//                network
+//            );
+//
+//            feat = resultPair.first;
+//            flow = resultPair.second;
+//        }
+//        else
+//        {
+//            auto corr = calculateCostVolume
+//            (
+//                c1[ level - 1 ],
+//                upFlow,
+//                network
+//            );
+//
+//            auto const resultPair = predictFlow
+//            (
+//                 corr,
+//                 c1[ level - 1],
+//                 upFlow,
+//                 upFeat,
+//                 level,
+//                 network
+//            );
+//
+//            feat = resultPair.first;
+//            flow = resultPair.second;
+//        }
+//
+//        if ( level != mParams.flowPredLevels )
+//        {
+//            auto const deconvLayer = addDeconvolutionLayer
+//            (
+//                std::string{ "deconv" } + std::to_string( level ),
+//                flow,
+//                2,
+//                nvinfer1::DimsHW{ 4, 4 },
+//                nvinfer1::DimsHW{ 2, 2 },
+//                network
+//            );
+//            upFlow = deconvLayer->getOutput( 0 );
+//
+//            auto const upFeatLayer = addDeconvolutionLayer
+//            (
+//                std::string{ "upfeat" } + std::to_string( level ),
+//                feat,
+//                2,
+//                nvinfer1::DimsHW{ 4, 4 },
+//                nvinfer1::DimsHW{ 2, 2 },
+//                network
+//            );
+//
+//            upFeat = upFeatLayer->getOutput( 0 );
+//        }
+//        else
+//        {
+//            flow = refineFlow
+//            (
+//                upFeat,
+//                upFlow,
+//                level,
+//                network
+//            );
+//        }
+//    }
+//
+//    flow->setName( mParams.outputTensorNames[ 0 ].c_str() );
+//    network->markOutput( *flow );
 
     builder->setMaxBatchSize( mParams.batchSize );
 
@@ -253,8 +266,13 @@ bool PWCNet::processInput( common::BufferManager& buffers)
 
     for ( int i = 0; i < elemNumber; ++i )
     {
-        firstHostDataBuffer[ i ] = 2;
-        secondHostDataBuffer[ i ] = 2;
+        firstHostDataBuffer[ i ] = -17 + i;
+    }
+
+    elemNumber = 2 * mParams.inputH * mParams.inputW;
+    for ( int i = 0; i < elemNumber; ++i )
+    {
+        secondHostDataBuffer[ i ] = -9 + i;
     }
 
     return true;
@@ -264,7 +282,7 @@ void PWCNet::printOutput( common::BufferManager& buffers)
 {
     float* prob = static_cast<float*>(buffers.getHostBuffer(mParams.outputTensorNames[0]));
     std::cout << "Output:\n";
-    for (int i = 0; i < 25 * mParams.inputH * mParams.inputW; ++i)
+    for (int i = 0; i < 2 * mParams.inputH * mParams.inputW; ++i)
     {
         std::cout << i << ": " << prob[i] << '\n';
     }

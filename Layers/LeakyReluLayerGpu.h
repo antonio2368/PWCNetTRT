@@ -5,7 +5,7 @@
 #ifndef PWCNET_LEAKYRELULAYERGPU_H
 #define PWCNET_LEAKYRELULAYERGPU_H
 
-#include "../Utils/cudaUtils.h"
+#include "../Utils/cudaUtilsGpu.h"
 
 #include <driver_types.h>
 

@@ -9,13 +9,6 @@
 
 #include <cuda_runtime_api.h>
 
-#define CUDA_THREADS_NUM 512
-
-inline int cudaBlockNum( const int N )
-{
-    return ( N + CUDA_THREADS_NUM - 1 ) / CUDA_THREADS_NUM;
-}
-
 struct Consts
 {
     static const float kZero;
@@ -26,8 +19,7 @@ struct Consts
                 auto res = (status); \
                 if ( res ) \
                 { \
-                    gLogError << "Cuda failure: " << __FILE__ << " at line " << __LINE__ << " in " << __FUNCTION__ << std::endl; \
+                    gLogError << "Cuda failure: " << __FILE__ << " at line " << __LINE__ << " in " << __FUNCTION__ << " " << res << std::endl; \
                 } \
             }
-
 #endif //PWCNET_CUDAUTILS_H

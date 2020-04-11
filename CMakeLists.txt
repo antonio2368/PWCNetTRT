@@ -4,6 +4,7 @@ project(PWCNet)
 set(CMAKE_CXX_STANDARD 14)
 
 set(CMAKE_CUDA_COMPILER "/usr/local/cuda/bin/nvcc")
+set(CMAKE_CUDA_STANDARD 14)
 
 # compile a CUDA file into an object file
 IF(NOT CMAKE_CUDA_COMPILE_OBJECT)
@@ -25,6 +26,8 @@ add_executable(
         Layers/LeakyReluLayerGpu.h
         Layers/CostVolumeLayer.cpp
         Layers/CostVolumeLayer.h
+        Layers/ImageWarpLayer.cpp
+        Layers/ImageWarpLayer.h
         Utils/common.h
         Utils/buffer.h
         Utils/logging.h
@@ -33,13 +36,15 @@ add_executable(
         Utils/half.h
         Utils/cudaUtils.cpp
         Utils/cudaUtils.h
+        Utils/cudaUtilsGpu.cu
+        Utils/cudaUtilsGpu.h
         Utils/TensorUtils.cpp
         Utils/TensorUtils.h
 )
 
 target_compile_options(PWCNet PUBLIC "-fno-rtti")
 
-set_source_files_properties( Layers/LeakyReluLayerGpu.cu PROPERTIES LANGUAGE CUDA )
+set_source_files_properties( Layers/LeakyReluLayerGpu.cu Utils/cudaUtilsGpu.cu PROPERTIES LANGUAGE CUDA )
 
 set(CUDART_LIB "/usr/local/cuda/lib64/libcudart.so" )
 set(CUDNN_LIB "/usr/lib/aarch64-linux-gnu/libcudnn.so" )

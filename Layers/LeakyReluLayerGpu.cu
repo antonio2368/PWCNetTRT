@@ -1,10 +1,5 @@
 #include "LeakyReluLayerGpu.h"
 
-#define CUDA_KERNEL_LOOP( i, n ) \
-    for ( int i = blockIdx.x * blockDim.x + threadIdx.x; \
-          i < ( n ); \
-          i += blockDim.x * gridDim.x )
-
 __global__ void LeakyRelu( const int n, const float* in, float* out, float alpha )
 {
     CUDA_KERNEL_LOOP(index, n)
