@@ -34,6 +34,7 @@ int main() {
     }
 
     gLogInfo << "Inference done!" << std::endl;
+    gLogInfo << "Total execution time: " << model.getTotalInferenceTime() << "ms" << std::endl;
 
     if ( !model.teardown() )
     {

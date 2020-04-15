@@ -6,6 +6,7 @@
 #define PWCNET_PWCNET_H
 
 #include "Utils/buffer.h"
+#include "Utils/Profiler.h"
 #include "Layers/PluginFactory.h"
 
 #include <NvInfer.h>
@@ -53,13 +54,21 @@ public:
     PWCNet( PWCNetParams const & params )
         : mEngine{ nullptr }
         , mParams{ params  }
-    {}
+    {
+        mProfiler = std::unique_ptr< Profiler >{ new Profiler{ false } };
+    }
 
     bool build();
     bool infer();
     bool teardown();
 
+    float getTotalInferenceTime() const noexcept
+    {
+        return mProfiler->getTotalTime();
+    }
+
 private:
+    std::unique_ptr< Profiler > mProfiler;
     PWCNetParams mParams;
     std::unordered_map< std::string, nvinfer1::Weights > mWeightMap;
 

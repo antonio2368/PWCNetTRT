@@ -42,7 +42,7 @@ add_executable(
         Utils/TensorUtils.h
         Layers/ReshapeLayer.cpp
         Layers/ReshapeLayer.h
-)
+        Utils/Profiler.h)
 
 target_compile_options(PWCNet PUBLIC "-fno-rtti")
 

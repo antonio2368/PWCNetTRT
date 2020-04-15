@@ -78,7 +78,7 @@ bool PWCNet::build()
 
     assert( network->getNbOutputs() == 1 );
     auto outputDims = network->getOutput( 0 )->getDimensions();
-//    assert( outputDims.nbDims == 3 );
+    assert( outputDims.nbDims == 3 );
 
     return true;
 }
@@ -253,6 +253,9 @@ bool PWCNet::infer()
     {
         return false;
     }
+
+    IProfiler* profiler{ mProfiler.get() };
+    context->setProfiler( profiler );
 
     assert( mParams.inputTensorNames.size() == 2 );
     if ( !processInput( buffers ) )
