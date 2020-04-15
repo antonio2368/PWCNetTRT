@@ -25,8 +25,8 @@ __global__ void roundToInt( const int n, const float* input, float* output )
 {
     CUDA_KERNEL_LOOP(index, n)
     {
-        int value = __float2int_rd( input[ index ] );
-        output[ index ] = __int2float_rd( value );
+        int value = static_cast< int >( input[ index ] );
+        output[ index ] = static_cast< float >( value );
     }
 }
 
@@ -35,6 +35,14 @@ __global__ void addValue( const int n, const float* input, float* output, float 
     CUDA_KERNEL_LOOP(index, n)
     {
         output[ index ] = input[ index ] + value;
+    }
+}
+
+__global__ void mutliplayAdd( const int n, const float* first, const float* second, const float* third, float* output )
+{
+    CUDA_KERNEL_LOOP(index, n)
+    {
+        output[ index ] = first[ index ] * second[ index ] + third[ index ];
     }
 }
 
@@ -56,5 +64,10 @@ cudaError_t roundToIntTensor( const int count, const float* input, float* output
 cudaError_t addValueToTensor( const int count, const float* input, float* output, float value )
 {
     addValue<<< cudaBlockNum( count ), CUDA_THREADS_NUM >>>( count, input, output, value );
+}
+
+cudaError_t multiplyAddTensors( const int count, const float* first, const float* second, const float* third, float* output )
+{
+    mutliplayAdd<<< cudaBlockNum( count ), CUDA_THREADS_NUM >>>( count, first, second, third, output );
 }
 

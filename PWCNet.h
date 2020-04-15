@@ -82,6 +82,8 @@ private:
         nvinfer1::DimsHW && kernelSize,
         nvinfer1::DimsHW && strides,
         PWCNet::UniquePtr< INetworkDefinition >& network,
+        bool activation = true,
+        std::string const& layerNameExtension = "",
         nvinfer1::DimsHW && dilation = nvinfer1::DimsHW{ 1, 1 }
     );
     nvinfer1::ILayer* addDeconvolutionLayer
@@ -120,7 +122,8 @@ private:
     (
         nvinfer1::ITensor* input,
         PWCNet::UniquePtr< INetworkDefinition >& network,
-        std::vector< nvinfer1::ITensor* >& extractedFeatures
+        std::vector< nvinfer1::ITensor* >& extractedFeatures,
+        std::string const & inputName
     );
 };
 

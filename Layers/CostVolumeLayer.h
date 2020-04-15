@@ -52,7 +52,7 @@ protected:
     nvinfer1::DimsCHW mSecondInputDims;
 
 private:
-    cudnnHandle_t mCudnn;
+    cudnnHandle_t mCudnn{ nullptr };
     cudnnOpTensorDescriptor_t mMultiplyDesc{ nullptr };
     cudnnTensorDescriptor_t mMultiplyOperandDesc{ nullptr };
     cudnnReduceTensorDescriptor_t mMeanDesc{ nullptr };

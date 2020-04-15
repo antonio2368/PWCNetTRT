@@ -40,6 +40,8 @@ add_executable(
         Utils/cudaUtilsGpu.h
         Utils/TensorUtils.cpp
         Utils/TensorUtils.h
+        Layers/ReshapeLayer.cpp
+        Layers/ReshapeLayer.h
 )
 
 target_compile_options(PWCNet PUBLIC "-fno-rtti")

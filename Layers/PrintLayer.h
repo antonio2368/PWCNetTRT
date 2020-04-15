@@ -6,17 +6,19 @@
 #define PWCNET_SPLITLAYER_H
 
 #include "NvInfer.h"
+#include <string>
 
-class SplitLayer : public nvinfer1::IPlugin
+class PrintLayer : public nvinfer1::IPlugin
 {
 public:
-    SplitLayer() = default;
+    PrintLayer( const std::string & name ) : mName{ name }
+    {
 
-    SplitLayer( const void* buffer, std::size_t size );
+    }
 
     inline int getNbOutputs() const override
     {
-        return 2;
+        return 1;
     }
 
     nvinfer1::Dims getOutputDimensions( int index, const nvinfer1::Dims* inputs, int nbInputDims ) override;
@@ -37,7 +39,7 @@ public:
 
     std::size_t getSerializationSize() override
     {
-        return 4 * sizeof( int );
+        return 0;
     }
 
     void serialize( void* buffer ) override;
@@ -45,8 +47,8 @@ public:
     int enqueue( int batchSize, const void* const *inputs, void** outputs, void* workspace, cudaStream_t stream ) override;
 
 protected:
-    nvinfer1::DimsCHW mDimOutputs;
-    int mSize;
+    nvinfer1::DimsCHW mDimInputs;
+    std::string mName;
 };
 
 

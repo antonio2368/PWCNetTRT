@@ -27,4 +27,6 @@ cudaError_t roundToIntTensor( const int count, const float* input, float* output
 
 cudaError_t addValueToTensor( const int count, const float* input, float* output, float value );
 
+cudaError_t multiplyAddTensors( const int count, const float* first, const float* second, const float* third, float* output );
+
 #endif //PWCNET_CUDAUTILSGPU_H

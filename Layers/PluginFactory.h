@@ -8,6 +8,9 @@
 #include "LeakyReluLayer.h"
 #include "NvInfer.h"
 #include "CostVolumeLayer.h"
+#include "ImageWarpLayer.h"
+#include "ReshapeLayer.h"
+#include "PrintLayer.h"
 
 #include <unordered_map>
 #include <string>
@@ -39,6 +42,18 @@ public:
             else if ( plugin.first == "leakyrelu" )
             {
                 delete static_cast< LeakyReluLayer* >( plugin.second );
+            }
+            else if ( plugin.first == "warp" )
+            {
+                delete static_cast< ImageWarpLayer* >( plugin.second );
+            }
+            else if ( plugin.first == "reshape" )
+            {
+                delete static_cast< ReshapeLayer* >( plugin.second );
+            }
+            else if ( plugin.first == "print" )
+            {
+                delete static_cast< PrintLayer* >( plugin.second );
             }
         }
     }

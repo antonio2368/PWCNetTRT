@@ -7,6 +7,7 @@
 
 #include <cuda_runtime_api.h>
 #include <cassert>
+#include <cmath>
 
 namespace Utils
 {
@@ -79,7 +80,7 @@ nvinfer1::Dims getStrides(nvinfer1::Dims const & dims)
     return strides;
 }
 
-nvinfer1::DimsHW getPadding
+std::pair< nvinfer1::DimsHW, nvinfer1::DimsHW > getPadding
 (
     nvinfer1::Dims const& inputDimension,
     nvinfer1::DimsHW const& strides,
@@ -90,15 +91,28 @@ nvinfer1::DimsHW getPadding
     assert( inputDimension.nbDims == 3 );
     auto const calculatePadding = [ & ]( int size, int stride, int kernelSize, int dilation  ) noexcept -> int
     {
-        float fSize = static_cast< float >( size );
-        return ( ( fSize - 1 ) * stride - fSize + kernelSize + ( kernelSize - 1 ) * ( dilation - 1 ) ) / 2 + 1;
+        int effectiveFilterSize = ( kernelSize - 1 ) * dilation + 1;
+
+        int outSize = ( size + stride - 1 ) / stride;
+
+        int totalPadding = ( outSize - 1 ) * stride + effectiveFilterSize - size;
+
+        totalPadding = totalPadding > 0 ? totalPadding : 0;
+
+        return totalPadding;
     };
 
-    return nvinfer1::DimsHW
-    (
-        calculatePadding( inputDimension.d[ 1 ], strides.h(), kernelDimension.h(), dilation.h() ),
-        calculatePadding( inputDimension.d[ 2 ], strides.w(), kernelDimension.w(), dilation.w() )
-    );
+    int totalHeightPadding = calculatePadding( inputDimension.d[ 1 ], strides.h(), kernelDimension.h(), dilation.h() );
+    int totalWidthPadding = calculatePadding( inputDimension.d[ 2 ], strides.w(), kernelDimension.w(), dilation.w() );
+
+    int preHeightPadding = totalHeightPadding / 2;
+    int preWidthPadding = totalWidthPadding / 2;
+
+    return
+    {
+        nvinfer1::DimsHW{ preHeightPadding, preWidthPadding },
+        nvinfer1::DimsHW{ totalHeightPadding - preHeightPadding, totalWidthPadding - preWidthPadding }
+    };
 }
 
 }

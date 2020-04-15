@@ -8,6 +8,48 @@
 #include "../Utils//TensorUtils.h"
 
 #include <cassert>
+#include <cstdio>
+
+namespace
+{
+    template< bool device = false >
+    void printValues( std::string const& name, float* array, std::size_t size )
+    {
+        std::size_t sizeInBytes = size * sizeof( float );
+
+        float* printArray;
+        if ( device )
+        {
+            printArray = new float[ size ];
+
+            CHECK( cudaMemcpy
+           (
+                   printArray,
+                   array,
+                   sizeInBytes,
+                   cudaMemcpyDeviceToHost
+           ))
+        }
+        else
+        {
+            printArray = array;
+        }
+
+
+        printf( "%s\n", name.c_str() );
+
+        for ( int i = 0; i < size; ++i )
+        {
+            printf( "%f\n", printArray[ i ] );
+        }
+
+        if ( device )
+        {
+            delete [] printArray;
+        }
+    }
+
+}
 
 ImageWarpLayer::ImageWarpLayer()
 {
@@ -180,7 +222,7 @@ int ImageWarpLayer::enqueue(int batchSize, const void *const * inputs, void ** o
     setTensorDescriptors( batchSize );
 
     std::size_t flowSize = Utils::tensorSize( mFlowDimensions ) * batchSize;
-    std::size_t flowChannelSize = mFlowDimensions.w() * mFlowDimensions.h();
+    std::size_t channelSize = mFlowDimensions.w() * mFlowDimensions.h();
 
     const float* image = static_cast< const float* >( inputs[ 0 ] );
     const float* flow = static_cast< const float* >( inputs[ 1 ] );
@@ -192,43 +234,45 @@ int ImageWarpLayer::enqueue(int batchSize, const void *const * inputs, void ** o
     subtractTensors( flowSize, batchedGrid, flow, batchedGrid );
 
     float* alpha0{ batchedGrid + flowSize };
-    float* alpha1{ alpha0 + flowChannelSize };
+    float* alpha1{ alpha0 + channelSize };
 
-    float* floor0{ alpha1 + flowChannelSize };
-    float* floor1{ floor0 + flowChannelSize };
+    float* floor0{ alpha1 + channelSize };
+    float* floor1{ floor0 + channelSize };
 
-    float* ceil0{ floor1 + flowChannelSize };
-    float* ceil1{ ceil0 + flowChannelSize };
+    float* ceil0{ floor1 + channelSize };
+    float* ceil1{ ceil0 + channelSize };
 
     auto const getAlpha = [ & ]( int const dimensionSize, float* input, float* alpha, float* floor, float* ceil )
     {
         float max = dimensionSize - 2.f;
         float min = 0.f;
 
-        clipTensor( flowChannelSize, input, floor, min, max );
-        roundToIntTensor( flowChannelSize, floor, floor );
-        addValueToTensor( flowChannelSize, floor, ceil, 1.f );
+        clipTensor( channelSize, input, floor, min, max );
+        roundToIntTensor( channelSize, floor, floor );
+        addValueToTensor( channelSize, floor, ceil, 1.f );
 
-        subtractTensors( flowChannelSize, input, floor, alpha );
-        clipTensor( flowChannelSize, alpha, alpha, 0.f, 1.f );
+        subtractTensors( channelSize, input, floor, alpha );
+        clipTensor( channelSize, alpha, alpha, 0.f, 1.f );
+
+
     };
 
     // ignoring batches for now
     getAlpha( mFlowDimensions.h(), batchedGrid, alpha0, floor0, ceil0 );
 
-    getAlpha( mFlowDimensions.w(), batchedGrid + flowChannelSize, alpha1, floor1, ceil1 );
+    getAlpha( mFlowDimensions.w(), batchedGrid + channelSize, alpha1, floor1, ceil1 );
 
-    float* topLeftCoordinates = static_cast< float* >(malloc( flowChannelSize * sizeof( float ) ));
-    float* topRightCoordinates = static_cast< float* >(malloc( flowChannelSize * sizeof( float ) ));
-    float* bottomLeftCoordinates = static_cast< float* >(malloc( flowChannelSize * sizeof( float ) ));
-    float* bottomRightCoordinates = static_cast< float* >(malloc( flowChannelSize * sizeof( float ) ));
+    float* topLeftCoordinates = new float[ channelSize ];
+    float* topRightCoordinates = new float[ channelSize ];
+    float* bottomLeftCoordinates = new float[ channelSize ];
+    float* bottomRightCoordinates = new float[ channelSize ];
 
-    float* topLeft{ ceil1 + flowChannelSize };
-    float* topRight{ topLeft + flowChannelSize };
-    float* bottomLeft{ topRight + flowChannelSize };
-    float* bottomRight{ bottomLeft + flowChannelSize };
+    float* topLeft{ ceil1 + channelSize };
+    float* topRight{ topLeft + channelSize };
+    float* bottomLeft{ topRight + channelSize };
+    float* bottomRight{ bottomLeft + channelSize };
 
-    float* linearCoordinates{ bottomRight + flowChannelSize };
+    float* linearCoordinates{ bottomRight + channelSize };
     auto const gather = [ & ]( const float* rowIndex, const float* columnIndex, float* outputCoordinates )
     {
         float imageWidth = mImageDimensions.w();
@@ -251,7 +295,7 @@ int ImageWarpLayer::enqueue(int batchSize, const void *const * inputs, void ** o
         (
             outputCoordinates,
             linearCoordinates,
-            flowChannelSize * sizeof( float ),
+            channelSize * sizeof( float ),
             cudaMemcpyDeviceToHost,
             stream
         );
@@ -263,120 +307,39 @@ int ImageWarpLayer::enqueue(int batchSize, const void *const * inputs, void ** o
     gather( ceil0, ceil1, bottomRightCoordinates );
 
     float* interpTop{ batchedGrid };
-    float* interpBottom{ batchedGrid + flowChannelSize };
+    float* interpBottom{ batchedGrid + channelSize };
     auto interpolateChannel = [ & ]( const float* channel, float* output )
     {
-        gatherFromChannel( channel, topLeftCoordinates, flowChannelSize, topLeft, stream );
-        gatherFromChannel( channel, topRightCoordinates, flowChannelSize, topRight, stream );
-        gatherFromChannel( channel, bottomLeftCoordinates, flowChannelSize, bottomLeft, stream );
-        gatherFromChannel( channel, bottomRightCoordinates, flowChannelSize, bottomRight, stream );
+        gatherFromChannel( channel, topLeftCoordinates, channelSize, topLeft, stream );
+        gatherFromChannel( channel, topRightCoordinates, channelSize, topRight, stream );
+        gatherFromChannel( channel, bottomLeftCoordinates, channelSize, bottomLeft, stream );
+        gatherFromChannel( channel, bottomRightCoordinates, channelSize, bottomRight, stream );
 
         //             interp_top = alphas[1] * (top_right - top_left) + top_left
-        subtractTensors( flowChannelSize, topRight, topLeft, interpTop );
-        CHECK( cudnnOpTensor
-        (
-            mCudnn,
-            mFlatMultiplyOp,
-            &Consts::kOne,
-            mFlowChannelFlatDesc,
-            alpha1,
-            &Consts::kOne,
-            mFlowChannelFlatDesc,
-            interpTop,
-            &Consts::kZero,
-            mFlowChannelFlatDesc,
-            interpTop
-        ))
-        CHECK( cudnnOpTensor
-        (
-            mCudnn,
-            mFlatAddOp,
-            &Consts::kOne,
-            mFlowChannelFlatDesc,
-            interpTop,
-            &Consts::kOne,
-            mFlowChannelFlatDesc,
-            topLeft,
-            &Consts::kZero,
-            mFlowChannelFlatDesc,
-            interpTop
-        ))
+        subtractTensors( channelSize, topRight, topLeft, interpTop );
+        multiplyAddTensors( channelSize, alpha1, interpTop, topLeft, interpTop );
 
         //             interp_bottom = alphas[1] * (bottom_right - bottom_left) + bottom_left
-        subtractTensors( flowChannelSize, bottomRight, bottomLeft, interpBottom );
-        CHECK( cudnnOpTensor
-       (
-           mCudnn,
-           mFlatMultiplyOp,
-           &Consts::kOne,
-           mFlowChannelFlatDesc,
-           alpha1,
-           &Consts::kOne,
-           mFlowChannelFlatDesc,
-           interpBottom,
-           &Consts::kZero,
-           mFlowChannelFlatDesc,
-           interpBottom
-       ))
-        CHECK( cudnnOpTensor
-       (
-           mCudnn,
-           mFlatAddOp,
-           &Consts::kOne,
-           mFlowChannelFlatDesc,
-           interpBottom,
-           &Consts::kOne,
-           mFlowChannelFlatDesc,
-           bottomLeft,
-           &Consts::kZero,
-           mFlowChannelFlatDesc,
-           interpBottom
-       ))
+        subtractTensors( channelSize, bottomRight, bottomLeft, interpBottom );
+        multiplyAddTensors( channelSize, alpha1, interpBottom, bottomLeft, interpBottom );
 
         //             interp_top = alphas[1] * (top_right - top_left) + top_left
-        subtractTensors( flowChannelSize, interpBottom, interpTop, output );
-        CHECK( cudnnOpTensor
-       (
-           mCudnn,
-           mFlatMultiplyOp,
-           &Consts::kOne,
-           mFlowChannelFlatDesc,
-           alpha0,
-           &Consts::kOne,
-           mFlowChannelFlatDesc,
-           output,
-           &Consts::kZero,
-           mFlowChannelFlatDesc,
-           output
-       ))
-        CHECK( cudnnOpTensor
-       (
-           mCudnn,
-           mFlatAddOp,
-           &Consts::kOne,
-           mFlowChannelFlatDesc,
-           output,
-           &Consts::kOne,
-           mFlowChannelFlatDesc,
-           interpTop,
-           &Consts::kZero,
-           mFlowChannelFlatDesc,
-           output
-       ))
+        subtractTensors( channelSize, interpBottom, interpTop, output );
+        multiplyAddTensors( channelSize, alpha0, output, interpTop, output );
     };
 
     const float* channel{ image };
     for ( int i = 0; i < mImageDimensions.c(); ++i )
     {
         interpolateChannel( channel, output );
-        channel += flowChannelSize;
-        output += flowChannelSize;
+        channel += channelSize;
+        output += channelSize;
     }
 
-    free( topLeftCoordinates );
-    free( topRightCoordinates );
-    free( bottomLeftCoordinates );
-    free ( bottomRightCoordinates );
+    delete [] topLeftCoordinates;
+    delete [] topRightCoordinates;
+    delete [] bottomLeftCoordinates;
+    delete [] bottomRightCoordinates;
 }
 
 void ImageWarpLayer::gatherFromChannel( const float* input, float* coordinates, std::size_t coordinateSize, float* output, cudaStream_t stream )

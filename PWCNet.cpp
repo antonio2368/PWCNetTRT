@@ -97,120 +97,137 @@ bool PWCNet::constructNetwork( PWCNet::UniquePtr< IBuilder >& builder, PWCNet::U
     (
         mParams.inputTensorNames[ 1 ].c_str(),
         nvinfer1::DataType::kFLOAT,
-        nvinfer1::DimsCHW( 2, mParams.inputH, mParams.inputW )
+        nvinfer1::DimsCHW( 3, mParams.inputH, mParams.inputW )
     );
     assert( secondImage );
 
-    std::vector< ITensor* > images{ firstImage, secondImage };
-    IPluginLayer* imageWarp = network->addPlugin
-    (
-        images.data(),
-        2,
-        *mPluginFactory.createPlugin< ImageWarpLayer >( "imagewarp" )
-    );
-    assert( imageWarp );
+    // extract features
+    std::vector< ITensor* > c1;
+    std::vector< ITensor* > c2;
 
-    imageWarp->getOutput( 0 )->setName( mParams.outputTensorNames[ 0 ].c_str() );
-    network->markOutput( *imageWarp->getOutput( 0 ) );
+    extractFeatures( firstImage, network, c1, "firstImage" );
+    extractFeatures( secondImage, network, c2, "secondImage" );
+
+    nvinfer1::ITensor* feat{ nullptr };
+    nvinfer1::ITensor* flow{ nullptr };
+    nvinfer1::ITensor* upFlow{ nullptr };
+    nvinfer1::ITensor* upFeat{ nullptr };
+    for ( int level{ mParams.pyramidLevels }; level >= mParams.flowPredLevels; --level )
+    {
+        if ( level == mParams.pyramidLevels )
+        {
+            auto corr = calculateCostVolume
+            (
+                c1[ level - 1 ],
+                c2[ level - 1 ],
+                network
+            );
+            assert( corr );
+
+            auto const resultPair = predictFlow
+            (
+                corr,
+                nullptr,
+                nullptr,
+                nullptr,
+                level,
+                network
+            );
+
+            feat = resultPair.first;
+            flow = resultPair.second;
+        }
+        else
+        {
+
+//            float scaler = 20.f / ( 1 << level );
+//            float scaler = 1.f;
+//            nvinfer1::Weights scaleWeights{ nvinfer1::DataType::kFLOAT, &scaler, 1 };
+//            nvinfer1::Weights powWeights{ nvinfer1::DataType::kFLOAT, nullptr, 0 };
+//            nvinfer1::Weights shiftWeights{ nvinfer1::DataType::kFLOAT, nullptr, 0 };
 //
-//    // extract features
-//    std::vector< ITensor* > c1;
-//    std::vector< ITensor* > c2;
-//
-//    extractFeatures( firstImage, network, c1 );
-//    extractFeatures( secondImage, network, c2 );
-//
-//    nvinfer1::ITensor* feat;
-//    nvinfer1::ITensor* flow;
-//    nvinfer1::ITensor* upFlow;
-//    nvinfer1::ITensor* upFeat;
-//    for ( int level{ mParams.pyramidLevels }; level >= mParams.flowPredLevels; --level )
-//    {
-//        if ( level == mParams.pyramidLevels )
-//        {
-//            auto corr = calculateCostVolume
+//            IScaleLayer* scalerLayer = network->addScale
 //            (
-//                c1[ level - 1 ],
-//                c2[ level - 2 ],
-//                network
+//                *upFlow,
+//                nvinfer1::ScaleMode::kUNIFORM,
+//                shiftWeights,
+//                scaleWeights,
+//                powWeights
 //            );
-//            assert( corr );
-//
-//            auto const resultPair = predictFlow
-//            (
-//                corr,
-//                nullptr,
-//                nullptr,
-//                nullptr,
-//                level,
-//                network
-//            );
-//
-//            feat = resultPair.first;
-//            flow = resultPair.second;
-//        }
-//        else
-//        {
-//            auto corr = calculateCostVolume
-//            (
-//                c1[ level - 1 ],
-//                upFlow,
-//                network
-//            );
-//
-//            auto const resultPair = predictFlow
-//            (
-//                 corr,
-//                 c1[ level - 1],
-//                 upFlow,
-//                 upFeat,
-//                 level,
-//                 network
-//            );
-//
-//            feat = resultPair.first;
-//            flow = resultPair.second;
-//        }
-//
-//        if ( level != mParams.flowPredLevels )
-//        {
-//            auto const deconvLayer = addDeconvolutionLayer
-//            (
-//                std::string{ "deconv" } + std::to_string( level ),
-//                flow,
-//                2,
-//                nvinfer1::DimsHW{ 4, 4 },
-//                nvinfer1::DimsHW{ 2, 2 },
-//                network
-//            );
-//            upFlow = deconvLayer->getOutput( 0 );
-//
-//            auto const upFeatLayer = addDeconvolutionLayer
-//            (
-//                std::string{ "upfeat" } + std::to_string( level ),
-//                feat,
-//                2,
-//                nvinfer1::DimsHW{ 4, 4 },
-//                nvinfer1::DimsHW{ 2, 2 },
-//                network
-//            );
-//
-//            upFeat = upFeatLayer->getOutput( 0 );
-//        }
-//        else
-//        {
-//            flow = refineFlow
-//            (
-//                upFeat,
-//                upFlow,
-//                level,
-//                network
-//            );
-//        }
-//    }
-//
-//    flow->setName( mParams.outputTensorNames[ 0 ].c_str() );
-//    network->markOutput( *flow );
+//            assert( scalerLayer );
+
+//            std::vector< ITensor* > warpInputs{ c2[ level - 1], scalerLayer->getOutput( 0 ) };
+            std::vector< ITensor* > warpInputs{ c2[ level - 1], upFlow };
+
+            nvinfer1::IPluginLayer* warpLayer = network->addPlugin
+            (
+                warpInputs.data(),
+                2,
+                *mPluginFactory.createPlugin< ImageWarpLayer >( "warp" )
+            );
+            assert( warpLayer );
+
+            auto corr = calculateCostVolume
+            (
+                c1[ level - 1 ],
+                warpLayer->getOutput( 0 ),
+                network
+            );
+
+            auto const resultPair = predictFlow
+            (
+                 corr,
+                 c1[ level - 1],
+                 upFlow,
+                 upFeat,
+                 level,
+                 network
+            );
+
+            feat = resultPair.first;
+            flow = resultPair.second;
+        }
+
+        if ( level != mParams.flowPredLevels )
+        {
+            auto const upFlowLayer = addDeconvolutionLayer
+            (
+                std::string{ "deconv" } + std::to_string( level ),
+                flow,
+                2,
+                nvinfer1::DimsHW{ 4, 4 },
+                nvinfer1::DimsHW{ 2, 2 },
+                network
+            );
+
+            upFlow = upFlowLayer->getOutput( 0 );
+
+            auto const upFeatLayer = addDeconvolutionLayer
+            (
+                std::string{ "upfeat" } + std::to_string( level ),
+                feat,
+                2,
+                nvinfer1::DimsHW{ 4, 4 },
+                nvinfer1::DimsHW{ 2, 2 },
+                network
+            );
+
+            upFeat = upFeatLayer->getOutput( 0 );
+        }
+        else
+        {
+            flow = refineFlow
+            (
+                feat,
+                flow,
+                level,
+                network
+            );
+        }
+    }
+
+    flow->setName( mParams.outputTensorNames[ 0 ].c_str() );
+    network->markOutput( *flow );
 
     builder->setMaxBatchSize( mParams.batchSize );
 
@@ -266,13 +283,13 @@ bool PWCNet::processInput( common::BufferManager& buffers)
 
     for ( int i = 0; i < elemNumber; ++i )
     {
-        firstHostDataBuffer[ i ] = -17 + i;
+        firstHostDataBuffer[ i ] = 0.5;
     }
 
-    elemNumber = 2 * mParams.inputH * mParams.inputW;
+    elemNumber = 3 * mParams.inputH * mParams.inputW;
     for ( int i = 0; i < elemNumber; ++i )
     {
-        secondHostDataBuffer[ i ] = -9 + i;
+        secondHostDataBuffer[ i ] = 0.5;
     }
 
     return true;
@@ -282,7 +299,7 @@ void PWCNet::printOutput( common::BufferManager& buffers)
 {
     float* prob = static_cast<float*>(buffers.getHostBuffer(mParams.outputTensorNames[0]));
     std::cout << "Output:\n";
-    for (int i = 0; i < 2 * mParams.inputH * mParams.inputW; ++i)
+    for (int i = 0; i < 2 * 16 * 16; ++i)
     {
         std::cout << i << ": " << prob[i] << '\n';
     }
@@ -342,7 +359,8 @@ void PWCNet::extractFeatures
 (
     nvinfer1::ITensor* input,
     PWCNet::UniquePtr< INetworkDefinition >& network,
-    std::vector< nvinfer1::ITensor* >& extractedFeatures
+    std::vector< nvinfer1::ITensor* >& extractedFeatures,
+    std::string const & inputName
 )
 {
     std::array< int, 6 > channels{ 16, 32, 64, 96, 128, 196 };
@@ -360,7 +378,9 @@ void PWCNet::extractFeatures
             channels[ i ],
             nvinfer1::DimsHW{ 3, 3 },
             nvinfer1::DimsHW{ 2, 2 },
-            network
+            network,
+            true,
+            inputName
         );
 
         currentTensor = conva->getOutput( 0 );
@@ -373,7 +393,9 @@ void PWCNet::extractFeatures
             channels[ i ],
             nvinfer1::DimsHW{ 3, 3 },
             nvinfer1::DimsHW{ 1, 1 },
-            network
+            network,
+            true,
+            inputName
         );
 
         currentTensor = convaa->getOutput( 0 );
@@ -386,7 +408,9 @@ void PWCNet::extractFeatures
             channels[ i ],
             nvinfer1::DimsHW{ 3, 3 },
             nvinfer1::DimsHW{ 1, 1 },
-            network
+            network,
+            true,
+            inputName
         );
 
         currentTensor = convb->getOutput( 0 );
@@ -403,14 +427,28 @@ nvinfer1::ILayer* PWCNet::addConvolutionLayer
     nvinfer1::DimsHW && kernelSize,
     nvinfer1::DimsHW && strides,
     PWCNet::UniquePtr<INetworkDefinition> &network,
+    bool activation,
+    std::string const& layerNameExtension,
     nvinfer1::DimsHW && dilation
 )
 {
+    // Pad input
+    auto const paddings = Utils::getPadding( input->getDimensions(), strides, kernelSize, dilation );
+
+    IPaddingLayer* paddingLayer = network->addPadding
+    (
+        *input,
+        paddings.first,
+        paddings.second
+    );
+
+    assert( paddingLayer );
+
     std::string const kernelWeights = layerName + "kernel";
     std::string const biasWeights = layerName + "bias";
     IConvolutionLayer* conv = network->addConvolution
     (
-        *input,
+        *paddingLayer->getOutput( 0 ),
         filterNum,
         kernelSize,
         mWeightMap[ kernelWeights.c_str() ],
@@ -419,7 +457,12 @@ nvinfer1::ILayer* PWCNet::addConvolutionLayer
     assert( conv );
     conv->setStride( strides );
     conv->setDilation( dilation );
-    conv->setPadding( Utils::getPadding( input->getDimensions(), strides, kernelSize, dilation ) );
+    conv->setName( ( layerName + layerNameExtension ).c_str() );
+
+    if ( !activation )
+    {
+        return conv;
+    }
 
     input = conv->getOutput( 0 );
 
@@ -456,7 +499,8 @@ nvinfer1::ILayer* PWCNet::addDeconvolutionLayer
     );
     assert( deconv );
     deconv->setStride( strides );
-    deconv->setPadding( Utils::getPadding( input->getDimensions(), strides, kernelSize, nvinfer1::DimsHW{ 1, 1 } ) );
+    deconv->setPadding( nvinfer1::DimsHW{ 1, 1 } );
+    deconv->setName( layerName.c_str() );
 
     return deconv;
 }
@@ -507,6 +551,7 @@ nvinfer1::ITensor* PWCNet::calculateCostVolume
         *mPluginFactory.createPlugin< LeakyReluLayer >( "leakyrelu", 0.1f )
     );
     assert( leakyRelu );
+
     return leakyRelu->getOutput( 0 );
 }
 
@@ -516,12 +561,12 @@ std::pair< nvinfer1::ITensor*, nvinfer1::ITensor* > PWCNet::predictFlow
     nvinfer1::ITensor* c1,
     nvinfer1::ITensor* upFlow,
     nvinfer1::ITensor* upFeat,
-    int level,
+    int const level,
     PWCNet::UniquePtr< INetworkDefinition >& network
 )
 {
     nvinfer1::ITensor* currentTensor = corr;
-    if ( c1 != nullptr && upFlow == nullptr && upFeat == nullptr )
+    if ( c1 != nullptr && upFlow != nullptr && upFeat != nullptr )
     {
         std::vector< nvinfer1::ITensor* > inputs{ corr, c1, upFlow, upFeat };
         IConcatenationLayer* concatLayer = network->addConcatenation
@@ -531,6 +576,7 @@ std::pair< nvinfer1::ITensor*, nvinfer1::ITensor* > PWCNet::predictFlow
         );
         assert( concatLayer );
         currentTensor = concatLayer->getOutput( 0 );
+
     }
 
     std::array< int, 5 > channels{ 128, 128, 96, 64, 32 };
@@ -558,7 +604,8 @@ std::pair< nvinfer1::ITensor*, nvinfer1::ITensor* > PWCNet::predictFlow
         2,
         nvinfer1::DimsHW{ 3, 3 },
         nvinfer1::DimsHW{ 1, 1 },
-        network
+        network,
+        false
     );
 
     return { currentTensor, flowPredictor->getOutput( 0 ) };
@@ -566,13 +613,13 @@ std::pair< nvinfer1::ITensor*, nvinfer1::ITensor* > PWCNet::predictFlow
 
 nvinfer1::ITensor* PWCNet::refineFlow
 (
-        nvinfer1::ITensor* upFeat,
-        nvinfer1::ITensor* upFlow,
+        nvinfer1::ITensor* feat,
+        nvinfer1::ITensor* flow,
         int level,
         PWCNet::UniquePtr< INetworkDefinition >& network
 )
 {
-    ITensor* currentTensor{ upFeat };
+    ITensor* currentTensor{ feat };
 
     std::array< int, 7 > channels{ 128, 128, 128, 96, 64, 32, 2 };
     std::array< int, 7 > dilation{ 1, 2, 4, 8, 16, 1, 1 };
@@ -587,16 +634,19 @@ nvinfer1::ITensor* PWCNet::refineFlow
             nvinfer1::DimsHW{ 3, 3 },
             nvinfer1::DimsHW{ 1, 1 },
             network,
+            true,
+            "",
             nvinfer1::DimsHW{ dilation[ i ], dilation [ i ] }
         );
 
         currentTensor = convolutionLayer->getOutput( 0 );
     }
 
+
     IElementWiseLayer* adder = network->addElementWise
     (
         *currentTensor,
-        *upFlow,
+        *flow,
         nvinfer1::ElementWiseOperation::kSUM
     );
     assert( adder );
@@ -605,21 +655,21 @@ nvinfer1::ITensor* PWCNet::refineFlow
 
 }
 
-//bool SampleMNISTAPI::teardown()
-//{
-//    // Release weights host memory
-//    for (auto& mem : mWeightMap)
-//    {
-//        auto weight = mem.second;
-//        if (weight.type == DataType::kFLOAT)
-//        {
-//            delete[] static_cast<const uint32_t*>(weight.values);
-//        }
-//        else
-//        {
-//            delete[] static_cast<const uint16_t*>(weight.values);
-//        }
-//    }
-//
-//    return true;
-//}
+bool PWCNet::teardown()
+{
+    // Release weights host memory
+    for (auto& mem : mWeightMap)
+    {
+        auto weight = mem.second;
+        if (weight.type == DataType::kFLOAT)
+        {
+            delete[] static_cast<const uint32_t*>(weight.values);
+        }
+        else
+        {
+            delete[] static_cast<const uint16_t*>(weight.values);
+        }
+    }
+
+    return true;
+}

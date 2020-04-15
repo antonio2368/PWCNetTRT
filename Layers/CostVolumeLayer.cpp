@@ -103,7 +103,7 @@ void CostVolumeLayer::terminate()
 
 int CostVolumeLayer::enqueue( int batchSize, const void* const * inputs, void** outputs, void* workspace, cudaStream_t stream )
 {
-    cudnnSetStream( mCudnn, stream );
+    CHECK( cudnnSetStream( mCudnn, stream ) )
 
     setTensorDescriptors( batchSize );
 

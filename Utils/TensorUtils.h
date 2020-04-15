@@ -7,6 +7,9 @@
 
 #include "NvInfer.h"
 
+#include <utility>
+#include <cassert>
+
 namespace Utils
 {
 
@@ -25,13 +28,14 @@ void getSlice
 
 nvinfer1::Dims getStrides(nvinfer1::Dims const & dims);
 
-nvinfer1::DimsHW getPadding
+std::pair< nvinfer1::DimsHW, nvinfer1::DimsHW > getPadding
 (
-    nvinfer1::Dims const& inputDimension,
-    nvinfer1::DimsHW const& strides,
-    nvinfer1::DimsHW const& kernelDimension,
-    nvinfer1::DimsHW const& dilation
+        nvinfer1::Dims const& inputDimension,
+        nvinfer1::DimsHW const& strides,
+        nvinfer1::DimsHW const& kernelDimension,
+        nvinfer1::DimsHW const& dilation
 );
+
 
 }
 
