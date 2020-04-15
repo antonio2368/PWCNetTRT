@@ -140,24 +140,23 @@ bool PWCNet::constructNetwork( PWCNet::UniquePtr< IBuilder >& builder, PWCNet::U
         else
         {
 
-//            float scaler = 20.f / ( 1 << level );
-//            float scaler = 1.f;
-//            nvinfer1::Weights scaleWeights{ nvinfer1::DataType::kFLOAT, &scaler, 1 };
-//            nvinfer1::Weights powWeights{ nvinfer1::DataType::kFLOAT, nullptr, 0 };
-//            nvinfer1::Weights shiftWeights{ nvinfer1::DataType::kFLOAT, nullptr, 0 };
-//
-//            IScaleLayer* scalerLayer = network->addScale
-//            (
-//                *upFlow,
-//                nvinfer1::ScaleMode::kUNIFORM,
-//                shiftWeights,
-//                scaleWeights,
-//                powWeights
-//            );
-//            assert( scalerLayer );
+            float scaler = 20.f / ( 1 << level );
+            nvinfer1::Weights scaleWeights{ nvinfer1::DataType::kFLOAT, &scaler, 1 };
+            nvinfer1::Weights powWeights{ nvinfer1::DataType::kFLOAT, nullptr, 0 };
+            nvinfer1::Weights shiftWeights{ nvinfer1::DataType::kFLOAT, nullptr, 0 };
 
-//            std::vector< ITensor* > warpInputs{ c2[ level - 1], scalerLayer->getOutput( 0 ) };
-            std::vector< ITensor* > warpInputs{ c2[ level - 1], upFlow };
+            IScaleLayer* scalerLayer = network->addScale
+            (
+                *upFlow,
+                nvinfer1::ScaleMode::kUNIFORM,
+                shiftWeights,
+                scaleWeights,
+                powWeights
+            );
+            assert( scalerLayer );
+
+            std::vector< ITensor* > warpInputs{ c2[ level - 1], scalerLayer->getOutput( 0 ) };
+//            std::vector< ITensor* > warpInputs{ c2[ level - 1], upFlow };
 
             nvinfer1::IPluginLayer* warpLayer = network->addPlugin
             (
